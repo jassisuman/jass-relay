@@ -58,6 +58,21 @@ const server = http.createServer(async (req,res) => {
       }
     } catch { return res.end(JSON.stringify({ symbol, tf, candles:[] })); }
   }
+   if (url.pathname === '/account') {
+    const name = url.searchParams.get('name');
+    try {
+      // TODO: use the stored key/secret for `name` and call the exchange's balance API.
+      // Bybit example (v5): GET /v5/account/wallet-balance + /v5/position/list (signed).
+      // Return this shape:
+      const data = {
+        equity: 0,      // total account equity (number)
+        pnl: 0,         // unrealized P&L (number)
+        positions: []   // [{symbol, side, size, entry, mark, pnl, pnlPct, stop}]
+      };
+      return res.end(JSON.stringify(data));
+    } catch { return res.end(JSON.stringify({ equity:0, pnl:0, positions:[] })); }
+  }
+  
   res.writeHead(404); res.end('{}');
 });
 
