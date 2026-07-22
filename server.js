@@ -1,6 +1,6 @@
 import { WebSocketServer } from 'ws';
 import WebSocket from 'ws';
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 5555;
 const wss = new WebSocketServer({ port: PORT });
 console.log('JASS relay running on port ' + PORT);
 wss.on('connection', (client) => {
