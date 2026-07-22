@@ -1,10 +1,13 @@
 import http from 'http';
-// ... keep your existing imports (ws, WebSocket) and TD config ...
+import { WebSocketServer } from 'ws';
+import WebSocket from 'ws';
 
 const PORT = process.env.PORT || 5555;
 const TWELVE_KEY = process.env.TWELVE_KEY || '430199692d5d4c6baf3b4107c7d1d260';
 
-// in-memory connection store (swap for a real DB/secrets vault later)
+const TD_INT = { '1m':'1min','3m':'5min','5m':'5min','15m':'15min','30m':'30min',
+  '1H':'1h','2H':'2h','4H':'4h','1D':'1day','1W':'1week','1M':'1month' };
+
 const CONN = {};
 const cors = (res) => { res.setHeader('Access-Control-Allow-Origin','*'); res.setHeader('Access-Control-Allow-Headers','Content-Type'); res.setHeader('Access-Control-Allow-Methods','GET,POST,OPTIONS'); };
 const body = (req) => new Promise(r => { let d=''; req.on('data',c=>d+=c); req.on('end',()=>{ try{r(JSON.parse(d||'{}'));}catch{r({});} }); });
@@ -15,18 +18,14 @@ const server = http.createServer(async (req,res) => {
   const url = new URL(req.url, 'http://x');
   res.setHeader('Content-Type','application/json');
 
-  if (url.pathname === '/status') {
-    return res.end(JSON.stringify(CONN));
-  }
+  if (url.pathname === '/status') return res.end(JSON.stringify(CONN));
+
   if (url.pathname === '/connect' && req.method === 'POST') {
-    const { name, key, secret } = await body(req);
+    const { name, key } = await body(req);
     if (!name) { res.writeHead(400); return res.end(JSON.stringify({error:'name required'})); }
-    // Real validation for Binance (public ping + key presence). Extend per exchange.
-    let ok = true, status = 'CONNECTED';
-    try {
-      if (/binance/i.test(name)) { const r = await fetch('https://api.binance.com/api/v3/ping'); ok = r.ok; }
-    } catch { ok = false; }
-    status = ok ? 'CONNECTED' : 'FAILED';
+    let ok = true;
+    try { if (/binance/i.test(name)) { const r = await fetch('https://api.binance.com/api/v3/ping'); ok = r.ok; } } catch { ok = false; }
+    const status = ok ? 'CONNECTED' : 'FAILED';
     CONN[name] = { status, hasKey: !!key, ts: Date.now() };
     res.writeHead(ok?200:502); return res.end(JSON.stringify({ name, status }));
   }
@@ -43,5 +42,38 @@ const server = http.createServer(async (req,res) => {
   res.writeHead(404); res.end('{}');
 });
 
-const wss = new WebSocketServer({ server });   // <-- was { port: PORT }
+const wss = new WebSocketServer({ server });
 server.listen(PORT, () => console.log('JASS relay + API on port ' + PORT));
+
+wss.on('connection', (client) => {
+  const ups = {};
+  const polls = {};
+  client.on('message', async (raw) => {
+    let d; try { d = JSON.parse(raw); } catch { return; }
+    if (d.op !== 'subscribe') return;
+    const { symbol, tf, providerSymbol } = d;
+    const key = symbol + tf;
+    if (ups[key]) { ups[key].close(); delete ups[key]; }
+    if (polls[key]) { clearInterval(polls[key]); delete polls[key]; }
+    const isCrypto = /USDT$/i.test(providerSymbol || '');
+    if (isCrypto) {
+      const up = new WebSocket(`wss://stream.binance.com:9443/ws/${providerSymbol.toLowerCase()}@kline_${tf.toLowerCase()}`);
+      ups[key] = up;
+      up.on('message', (m) => { try { const k = JSON.parse(m).k; client.send(JSON.stringify({ symbol, tf, candle:{ t:k.t, o:+k.o, h:+k.h, l:+k.l, c:+k.c, v:+k.v }, closed:k.x })); } catch {} });
+    } else {
+      const interval = TD_INT[tf] || '15min';
+      const fetchSeries = async () => {
+        try {
+          const u = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbol)}&interval=${interval}&outputsize=60&order=ASC&apikey=${TWELVE_KEY}`;
+          const r = await fetch(u); const j = await r.json();
+          if (!j.values) return;
+          const candles = j.values.map(v => ({ o:+v.open, h:+v.high, l:+v.low, c:+v.close }));
+          client.send(JSON.stringify({ symbol, tf, candles }));
+        } catch {}
+      };
+      fetchSeries();
+      polls[key] = setInterval(fetchSeries, 5000);
+    }
+  });
+  client.on('close', () => { Object.values(ups).forEach(u => u.close()); Object.values(polls).forEach(t => clearInterval(t)); });
+});
