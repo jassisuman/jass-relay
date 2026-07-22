@@ -39,6 +39,25 @@ const server = http.createServer(async (req,res) => {
     const { name } = await body(req); delete CONN[name];
     return res.end(JSON.stringify({ name, status:'NOT_CONFIGURED' }));
   }
+  if (url.pathname === '/candles') {
+    const symbol = url.searchParams.get('symbol');
+    const tf = url.searchParams.get('tf');
+    const providerSymbol = url.searchParams.get('providerSymbol') || '';
+    try {
+      if (/USDT$/i.test(providerSymbol)) {
+        const r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${providerSymbol}&interval=${tf.toLowerCase()}&limit=60`);
+        const j = await r.json();
+        const candles = j.map(k => ({ o:+k[1], h:+k[2], l:+k[3], c:+k[4] }));
+        return res.end(JSON.stringify({ symbol, tf, candles }));
+      } else {
+        const interval = TD_INT[tf] || '15min';
+        const r = await fetch(`https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbol)}&interval=${interval}&outputsize=60&order=ASC&apikey=${TWELVE_KEY}`);
+        const j = await r.json();
+        const candles = (j.values||[]).map(v => ({ o:+v.open, h:+v.high, l:+v.low, c:+v.close }));
+        return res.end(JSON.stringify({ symbol, tf, candles }));
+      }
+    } catch { return res.end(JSON.stringify({ symbol, tf, candles:[] })); }
+  }
   res.writeHead(404); res.end('{}');
 });
 
