@@ -2,7 +2,7 @@ import { WebSocketServer } from 'ws';
 import WebSocket from 'ws';
 
 const PORT = process.env.PORT || 5555;
-const TWELVE_KEY = process.env.TWELVE_KEY || 'PASTE_YOUR_TWELVE_DATA_KEY';
+const TWELVE_KEY = process.env.TWELVE_KEY || 'P430199692d5d4c6baf3b4107c7d1d260';
 
 // tf -> Twelve Data interval
 const TD_INT = { '1m':'1min','3m':'5min','5m':'5min','15m':'15min','30m':'30min',
